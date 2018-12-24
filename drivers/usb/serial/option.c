@@ -233,6 +233,7 @@ static void option_instat_callback(struct urb *urb);
 /* These Quectel products use Qualcomm's vendor ID */
 #define QUECTEL_PRODUCT_UC20			0x9003
 #define QUECTEL_PRODUCT_UC15			0x9090
+#define QUECTEL_PRODUCT_EC20      0x9215
 /* These Yuga products use Qualcomm's vendor ID */
 #define YUGA_PRODUCT_CLM920_NC5			0x9625
 
@@ -241,6 +242,10 @@ static void option_instat_callback(struct urb *urb);
 #define QUECTEL_PRODUCT_EC21			0x0121
 #define QUECTEL_PRODUCT_EC25			0x0125
 #define QUECTEL_PRODUCT_BG96			0x0296
+#define QUECTEL_PRODUCT_AG35      0x0435
+#define QUECTEL_PRODUCT_EX06      0x0435
+#define QUECTEL_PRODUCT_EG95      0x0195
+#define QUECTEL_PRODUCT_EG91      0x0191
 
 #define CMOTECH_VENDOR_ID			0x16d8
 #define CMOTECH_PRODUCT_6001			0x6001
@@ -1190,6 +1195,8 @@ static const struct usb_device_id option_ids[] = {
 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, QUECTEL_PRODUCT_UC15)},
 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, QUECTEL_PRODUCT_UC20),
 	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+  { USB_DEVICE(QUALCOMM_VENDOR_ID, QUECTEL_PRODUCT_EC20),
+    .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
 	/* Yuga products use Qualcomm vendor ID */
 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, YUGA_PRODUCT_CLM920_NC5),
 	  .driver_info = (kernel_ulong_t)&yuga_clm920_nc5_blacklist },
@@ -1200,6 +1207,14 @@ static const struct usb_device_id option_ids[] = {
 	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
 	{ USB_DEVICE(QUECTEL_VENDOR_ID, QUECTEL_PRODUCT_BG96),
 	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+  { USB_DEVICE(QUECTEL_VENDOR_ID, QUECTEL_PRODUCT_AG35),
+    .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+  { USB_DEVICE(QUECTEL_VENDOR_ID, QUECTEL_PRODUCT_EX06),
+    .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+  { USB_DEVICE(QUECTEL_VENDOR_ID, QUECTEL_PRODUCT_EG95),
+    .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+  { USB_DEVICE(QUECTEL_VENDOR_ID, QUECTEL_PRODUCT_EG91),
+    .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
 	{ USB_DEVICE(CMOTECH_VENDOR_ID, CMOTECH_PRODUCT_6001) },
 	{ USB_DEVICE(CMOTECH_VENDOR_ID, CMOTECH_PRODUCT_CMU_300) },
 	{ USB_DEVICE(CMOTECH_VENDOR_ID, CMOTECH_PRODUCT_6003),
@@ -2088,6 +2103,7 @@ static struct usb_serial_driver option_1port_device = {
 #ifdef CONFIG_PM
 	.suspend           = usb_wwan_suspend,
 	.resume            = usb_wwan_resume,
+  .reset_resume      = usb_wwan_resume,
 #endif
 };
 
@@ -2126,6 +2142,65 @@ static int option_probe(struct usb_serial *serial,
 	    dev_desc->idProduct == cpu_to_le16(SAMSUNG_PRODUCT_GT_B3730) &&
 	    iface_desc->bInterfaceClass != USB_CLASS_CDC_DATA)
 		return -ENODEV;
+
+#if 1 //Added by Quectel
+//Quectel UC20's interface 4 can be used as USB network device
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
+    serial->dev->descriptor.idProduct == cpu_to_le16(0x9003)
+    && serial->interface->cur_altsetting->desc.bInterfaceNumber >= 4)
+  return -ENODEV;
+//Quectel EC20's interface 4 can be used as USB network device
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
+    serial->dev->descriptor.idProduct == cpu_to_le16(0x9215)
+    && serial->interface->cur_altsetting->desc.bInterfaceNumber >= 4)
+  return -ENODEV;
+//Quectel EC25&EC21&EG91&EG95&EG06&EP06&EM06&BG96/AG35's interface 4 can be used as USB network device
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x2C7C)
+    && serial->interface->cur_altsetting->desc.bInterfaceNumber >= 4)
+  return -ENODEV;
+  #endif
+  
+  #if 1 //Added by Quectel
+  //For USB Auto Suspend
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
+    serial->dev->descriptor.idProduct == cpu_to_le16(0x9090)) {
+    pm_runtime_set_autosuspend_delay(&serial->dev->dev, 3000);
+    usb_enable_autosuspend(serial->dev);
+  }
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
+    serial->dev->descriptor.idProduct == cpu_to_le16(0x9003)) {
+    pm_runtime_set_autosuspend_delay(&serial->dev->dev, 3000);
+    usb_enable_autosuspend(serial->dev);
+  }
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
+    serial->dev->descriptor.idProduct == cpu_to_le16(0x9215)) {
+    pm_runtime_set_autosuspend_delay(&serial->dev->dev, 3000);
+    usb_enable_autosuspend(serial->dev);
+  }
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x2C7C)) {
+    pm_runtime_set_autosuspend_delay(&serial->dev->dev, 3000);
+    usb_enable_autosuspend(serial->dev);
+  }
+  #endif
+  
+  #if 1 //Added by Quectel
+  //For USB Remote Wakeup
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
+    serial->dev->descriptor.idProduct == cpu_to_le16(0x9090)) {
+    device_init_wakeup(&serial->dev->dev, 1); //usb remote wakeup
+  }
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
+    serial->dev->descriptor.idProduct == cpu_to_le16(0x9003)) {
+    device_init_wakeup(&serial->dev->dev, 1); //usb remote wakeup
+  }
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
+    serial->dev->descriptor.idProduct == cpu_to_le16(0x9215)) {
+    device_init_wakeup(&serial->dev->dev, 1); //usb remote wakeup
+  }
+  if (serial->dev->descriptor.idVendor == cpu_to_le16(0x2C7C)) {
+    device_init_wakeup(&serial->dev->dev, 1); //usb remote wakeup
+  }
+  #endif
 
 	/* Store the blacklist info so we can use it during attach. */
 	usb_set_serial_data(serial, (void *)blacklist);

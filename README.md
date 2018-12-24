@@ -28,7 +28,7 @@ the Linux headers will be located in /usr/src/
 $ git clone git@github.com:ngohaibac/Quectel_USB_Serial_Driver.git
 $ cd Quectel_USB_Serial_Driver/4.15.0
 $ make 
-$ make install
+$ sudo make install
 ```
 
 # Credit
