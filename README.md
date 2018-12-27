@@ -24,9 +24,17 @@ the Linux headers will be located in /usr/src/
 
 # Compile/Install
 
+Determine the kernel version:
+
+```
+$ uname -r
+```
+Checkout the driver to the correct kernel version:
+
 ```
 $ git clone git@github.com:ngohaibac/Quectel_USB_Serial_Driver.git
-$ cd Quectel_USB_Serial_Driver/4.15.0
+$ cd Quectel_USB_Serial_Driver
+$ git checkout 4.15.0
 $ make 
 $ sudo make install
 ```
