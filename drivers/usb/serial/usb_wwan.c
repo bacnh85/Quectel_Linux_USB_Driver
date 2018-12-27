@@ -1,8 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
   USB Driver layer for GSM modems
 
   Copyright (C) 2005  Matthias Urlichs <smurf@smurf.noris.de>
+
+  This driver is free software; you can redistribute it and/or modify
+  it under the terms of Version 2 of the GNU General Public License as
+  published by the Free Software Foundation.
 
   Portions copied from the Keyspan driver by Hugh Blemings <hugh@blemings.org>
 
@@ -498,7 +501,6 @@ static struct urb *usb_wwan_setup_urb(struct usb_serial_port *port,
 	usb_fill_bulk_urb(urb, serial->dev,
 			  usb_sndbulkpipe(serial->dev, endpoint) | dir,
 			  buf, len, callback, ctx);
-
 	#if 1 //Added by Quectel for zero packet
 	if (dir == USB_DIR_OUT) {
 		struct usb_device_descriptor *desc = &serial->dev->descriptor;
@@ -511,7 +513,7 @@ static struct urb *usb_wwan_setup_urb(struct usb_serial_port *port,
 	if (desc->idVendor == cpu_to_le16(0x2C7C))
 		urb->transfer_flags |= URB_ZERO_PACKET;
 	}
-	#endif
+	#endif		  
 
 	return urb;
 }
@@ -734,4 +736,4 @@ EXPORT_SYMBOL(usb_wwan_resume);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
