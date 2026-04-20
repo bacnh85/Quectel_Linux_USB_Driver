@@ -1,6 +1,6 @@
---- a/qmi_wwan.c
+--- a/drivers/net/usb/qmi_wwan.c
 
-+++ b/qmi_wwan.c
++++ b/drivers/net/usb/qmi_wwan.c
 
 @@ -1424,6 +1424,7 @@
 
