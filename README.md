@@ -1,44 +1,62 @@
-# Introduction
+# Quectel Linux USB Driver
 
-Quectel USB Serial Driver for UCxx/EC2x/EGxx/EP06/EM06/BG96/AG35.
+Out-of-tree and in-kernel-patch drivers for Quectel cellular modems, organized by Linux kernel LTS version.
 
-As I am working in Quectel as an FAE for Vietnam and South East Asia, we will try our best to support all world wide customers.
+## Quick Start
 
-# Prepare
+```bash
+# 1. Find your kernel version
+uname -r    # e.g. 5.15.0-100-generic
 
-Ubuntu 16.04 running kernel 4.15.0-43-generic.
+# 2. Checkout the matching branch
+git clone https://github.com/bacnh85/Quectel_Linux_USB_Driver.git
+cd Quectel_Linux_USB_Driver
+git checkout v5.15    # use your major.minor version
 
-```
-$ uname -a
-Linux ubuntu 4.15.0-43-generic #46~16.04.1-Ubuntu SMP Fri Dec 7 13:31:08 UTC 2018 x86_64 x86_64 x86_64 GNU/Linux
-
-```
-
-Download Ubuntu linux headers:
-
-```
-$ sudo apt-get install linux-headers-$(uname -r)
+# 3. Follow the README.md on that branch
 ```
 
-the Linux headers will be located in /usr/src/
+## Supported Branches
 
-# Compile/Install
+| Branch | Kernel | Option Devices | QMI Devices | Status |
+|--------|--------|---------------|-------------|--------|
+| `v5.4` | 5.4.x LTS | 14 products | 12 entries | Legacy (Ubuntu 20.04) |
+| `v5.15` | 5.15.x LTS | 14 products | 16 entries | Maintained |
+| `v6.1` | 6.1.x LTS | 17 products | 18 entries | Maintained |
+| `v6.6` | 6.6.x LTS | 33 products | 18 entries | Current LTS |
+| `v6.12` | 6.12.x | 39 products | 19 entries | Latest |
 
-Determine the kernel version:
+## Two Build Methods
 
-```
-$ uname -r
-```
-Checkout the driver to the correct kernel version:
+Each branch supports two installation methods:
 
-```
-$ git clone git@github.com:ngohaibac/Quectel_USB_Serial_Driver.git
-$ cd Quectel_USB_Serial_Driver
-$ git checkout 4.15.0
-$ make 
-$ sudo make install
-```
+### Method 1: Out-of-Tree Module Build (Recommended)
+Build and install driver modules without modifying your kernel source.
+See the branch-specific README for details.
 
-# Credit
+### Method 2: In-Kernel Patch
+Apply patches to your kernel source tree to permanently add Quectel support.
+Patch files are in the `patches/` directory on each branch.
 
-This guide and kernel driver is based on Quectel Driver User Guide V1.8 by Quectel Wirreless Solutions.
+## Supported Quectel Modules
+
+- **2G/3G:** UC15, UC20
+- **4G LTE:** EC20, EC21, EC25, EG91, EG95, BG96, AG35, EP06, EM12, EC200S, EC200T, EC200A, EC200U
+- **5G NR:** RM500Q, RM520N, RM500K, RG650V, EM05G series, EM060K/EM061K series
+
+## Device IDs (Vendor: 0x2C7C)
+
+The full list of Quectel USB device IDs is maintained in:
+- `drivers/usb/serial/option.c` — serial port (AT/modem) support
+- `drivers/net/usb/qmi_wwan_q.c` — QMI network + QMAP multiplexing
+- `patches/*.patch` — diffs for in-kernel integration
+
+## Source Attribution
+
+- **Out-of-tree drivers** are based on [QuectelWB/q_drivers](https://github.com/QuectelWB/q_drivers) with kernel version compatibility (3.x – 6.x+)
+- **In-kernel patches** are backported from mainline Linux 6.12 to older LTS kernels
+- Both are GPL-2.0 licensed
+
+## License
+
+GPL-2.0-only — same as the Linux kernel
