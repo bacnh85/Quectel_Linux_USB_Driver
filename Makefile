@@ -30,10 +30,10 @@ prepare:
 	@test -f "$(NET_SRC)/qmi_wwan.c" && cp "$(NET_SRC)/qmi_wwan.c" "$(BUILD_DIR)/net/qmi_wwan.c" || echo "WARN: qmi_wwan.c not found"
 	@# Apply Quectel enhancement patches (strip 2 path components for build/ layout)
 	@if [ -f patches/option.c.patch ] && ! head -1 patches/option.c.patch | grep -q "No changes"; then \
-		patch -p2 -d $(BUILD_DIR)/serial < patches/option.c.patch || echo "NOTE: option.c patch may conflict"; \
+		patch -p4 -d $(BUILD_DIR)/serial < patches/option.c.patch || echo "NOTE: option.c patch may conflict"; \
 	fi
 	@if [ -f patches/qmi_wwan.c.patch ] && ! head -1 patches/qmi_wwan.c.patch | grep -q "No changes"; then \
-		patch -p2 -d $(BUILD_DIR)/net < patches/qmi_wwan.c.patch || echo "NOTE: qmi_wwan.c patch may conflict"; \
+		patch -p5 -d $(BUILD_DIR)/net < patches/qmi_wwan.c.patch || echo "NOTE: qmi_wwan.c patch may conflict"; \
 	fi
 	@# Write Kbuild files
 	@echo 'obj-m += option.o usb_wwan.o' > $(BUILD_DIR)/serial/Kbuild
