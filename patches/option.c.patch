@@ -1,6 +1,6 @@
---- a/option.c
+--- a/drivers/usb/serial/option.c
 
-+++ b/option.c
++++ b/drivers/usb/serial/option.c
 
 @@ -261,6 +261,27 @@
 
