@@ -24,15 +24,16 @@ prepare:
 	@echo "=== Quectel USB Driver Out-of-Tree Build ==="
 	@mkdir -p $(BUILD_DIR)/serial $(BUILD_DIR)/net
 	@# Copy upstream sources from kernel tree
-	@test -f "$(SERIAL_SRC)/option.c" && cp "$(SERIAL_SRC)/option.c" "$(BUILD_DIR)/serial/option.c" || echo "WARNING: $(SERIAL_SRC)/option.c not found"
-	@test -f "$(SERIAL_SRC)/usb_wwan.c" && cp "$(SERIAL_SRC)/usb_wwan.c" "$(BUILD_DIR)/serial/usb_wwan.c" || echo "WARNING: $(SERIAL_SRC)/usb_wwan.c not found"
-	@test -f "$(NET_SRC)/qmi_wwan.c" && cp "$(NET_SRC)/qmi_wwan.c" "$(BUILD_DIR)/net/qmi_wwan.c" || echo "WARNING: $(NET_SRC)/qmi_wwan.c not found"
-	@# Apply Quectel enhancement patches (strip 2 path components for out-of-tree)
+	@test -f "$(SERIAL_SRC)/option.c" && cp "$(SERIAL_SRC)/option.c" "$(BUILD_DIR)/serial/option.c" || echo "WARN: option.c not found"
+	@test -f "$(SERIAL_SRC)/usb_wwan.c" && cp "$(SERIAL_SRC)/usb_wwan.c" "$(BUILD_DIR)/serial/usb_wwan.c" || echo "WARN: usb_wwan.c not found"
+	@test -f "$(SERIAL_SRC)/usb-wwan.h" && cp "$(SERIAL_SRC)/usb-wwan.h" "$(BUILD_DIR)/serial/usb-wwan.h" || echo "WARN: usb-wwan.h not found"
+	@test -f "$(NET_SRC)/qmi_wwan.c" && cp "$(NET_SRC)/qmi_wwan.c" "$(BUILD_DIR)/net/qmi_wwan.c" || echo "WARN: qmi_wwan.c not found"
+	@# Apply Quectel enhancement patches (strip 2 path components for build/ layout)
 	@if [ -f patches/option.c.patch ] && ! head -1 patches/option.c.patch | grep -q "No changes"; then \
-		patch -p2 -d $(BUILD_DIR)/serial < patches/option.c.patch || echo "NOTE: option.c patch may have conflicts if IDs already present"; \
+		patch -p2 -d $(BUILD_DIR)/serial < patches/option.c.patch || echo "NOTE: option.c patch may conflict"; \
 	fi
 	@if [ -f patches/qmi_wwan.c.patch ] && ! head -1 patches/qmi_wwan.c.patch | grep -q "No changes"; then \
-		patch -p2 -d $(BUILD_DIR)/net < patches/qmi_wwan.c.patch || echo "NOTE: qmi_wwan.c patch may have conflicts if IDs already present"; \
+		patch -p2 -d $(BUILD_DIR)/net < patches/qmi_wwan.c.patch || echo "NOTE: qmi_wwan.c patch may conflict"; \
 	fi
 	@# Write Kbuild files
 	@echo 'obj-m += option.o usb_wwan.o' > $(BUILD_DIR)/serial/Kbuild
