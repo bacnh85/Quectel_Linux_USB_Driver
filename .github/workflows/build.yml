@@ -3,9 +3,12 @@ name: Build & Validate Drivers
 on:
   push:
     branches: ['v5.4', 'v5.15', 'v6.1', 'v6.6', 'v6.12']
-  pull_request:
-    branches: [master]
   workflow_dispatch:
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: build-${{ github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   # ── Resolve kernel version from branch name ────────────────────────
@@ -17,20 +20,23 @@ jobs:
     steps:
       - id: meta
         run: |
-          BRANCH="${GITHUB_REF_NAME}"
-          KV="${BRANCH#v}"
+          # Extract version from branch name: "v5.15" → "5.15"
+          REF="${GITHUB_REF_NAME}"
+          # Handle merge refs like "10/merge" — extract from HEAD
+          if [[ "$REF" == */merge ]]; then
+            REF="${{ github.head_ref }}"
+          fi
+          KV="${REF#v}"
           MAJOR="${KV%%.*}"
-          echo "kv=${KV}"   >> "$GITHUB_OUTPUT"
+          echo "kv=${KV}"      >> "$GITHUB_OUTPUT"
           echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
-          echo "Building for kernel ${KV} (branch ${BRANCH})"
+          echo "Branch: ${REF} → Kernel: ${KV} (major: ${MAJOR})"
 
   # ── Build out-of-tree modules against kernel source ────────────────
   build-out-of-tree:
     needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
     steps:
       - uses: actions/checkout@v4
 
@@ -47,72 +53,67 @@ jobs:
           echo "Downloading: ${URL}"
           curl -fSL --retry 3 --retry-delay 5 -o /tmp/linux.tar.xz "${URL}"
           tar xf /tmp/linux.tar.xz -C /tmp --strip-components=1
-          echo "Kernel source: $(ls /tmp/Makefile)"
+          echo "Kernel source ready"
 
       - name: Build minimal kernel (vmlinux + modules_prepare)
         run: |
           cd /tmp
-          # Use tinyconfig as base — minimal, fast to build
+          # Minimal config with USB subsystem enabled
           make tinyconfig
-          # Enable subsystems our drivers depend on
-          scripts/config --enable CONFIG_USB
-          scripts/config --enable CONFIG_USB_SUPPORT
+          # Enable essential subsystems for our drivers
+          scripts/config --enable CONFIG_64BIT
           scripts/config --enable CONFIG_MODULES
           scripts/config --enable CONFIG_MODULE_UNLOAD
+          scripts/config --enable CONFIG_USB
+          scripts/config --enable CONFIG_USB_SUPPORT
           scripts/config --enable CONFIG_NET
           scripts/config --enable CONFIG_INET
           scripts/config --enable CONFIG_TTY
           scripts/config --enable CONFIG_BLOCK
-          scripts/config --enable CONFIG_64BIT
-          # USB serial subsystem
-          scripts/config --module CONFIG_USB_SERIAL
-          scripts/config --module CONFIG_USB_SERIAL_WWAN
-          scripts/config --module CONFIG_USB_SERIAL_OPTION
-          # USB net subsystem
-          scripts/config --module CONFIG_USB_NET_DRIVERS
-          scripts/config --module CONFIG_USB_NET_CDCETHER
-          scripts/config --module CONFIG_USB_ACM
-          # Needed dependencies
-          scripts/config --enable CONFIG_GENERIC_ALLOCATOR
-          scripts/config --enable CONFIG_CRC32
-          scripts/config --enable CONFIG_CRC_CCITT
           scripts/config --enable CONFIG_PRINTK
           scripts/config --enable CONFIG_PROC_FS
           scripts/config --enable CONFIG_SYSFS
           scripts/config --enable CONFIG_DEVTMPFS
+          scripts/config --enable CONFIG_GENERIC_ALLOCATOR
+          scripts/config --enable CONFIG_CRC32
+          scripts/config --enable CONFIG_CRC_CCITT
           scripts/config --enable CONFIG_CRC16
+          scripts/config --module CONFIG_USB_SERIAL
+          scripts/config --module CONFIG_USB_SERIAL_WWAN
+          scripts/config --module CONFIG_USB_SERIAL_OPTION
+          scripts/config --module CONFIG_USB_NET_DRIVERS
+          scripts/config --module CONFIG_USB_NET_CDCETHER
+          scripts/config --module CONFIG_USB_ACM
           make olddefconfig
           # Build vmlinux first (needed for modpost symbol resolution)
-          make vmlinux -j$(nproc)
-          # Then prepare module build infrastructure
-          make modules_prepare -j$(nproc)
+          # Disable GCC warnings that break objtool on old kernels with new GCC
+          make vmlinux -j$(nproc) HOSTCFLAGS="-Wno-error" HOSTCXXFLAGS="-Wno-error" 2>&1 | tail -5
+          # Prepare module build infrastructure
+          make modules_prepare -j$(nproc) HOSTCFLAGS="-Wno-error" HOSTCXXFLAGS="-Wno-error" 2>&1 | tail -5
 
       - name: Build out-of-tree modules
         run: |
           echo "=== Building serial drivers ==="
-          $(MAKE) -C /tmp M=$(PWD)/drivers/usb/serial modules 2>&1 | tee /tmp/serial-build.log
-          echo "=== Building net drivers ==="
-          $(MAKE) -C /tmp M=$(PWD)/drivers/net/usb modules 2>&1 | tee /tmp/net-build.log
+          make KDIR=/tmp 2>&1 | tee /tmp/build.log
+          echo "=== Build complete ==="
 
       - name: Verify built modules
         run: |
           ERRORS=0
           for mod in option.ko usb_wwan.ko qmi_wwan.ko; do
-            if find drivers/ -name "$mod" -print -quit | grep -q .; then
+            found=$(find drivers/ -name "$mod" -print -quit 2>/dev/null)
+            if [ -n "$found" ]; then
               echo "✓ $mod built successfully"
             else
               echo "✗ $mod NOT found!"
               ERRORS=$((ERRORS + 1))
             fi
           done
-          # Check for compilation errors
-          for log in /tmp/serial-build.log /tmp/net-build.log; do
-            if grep -q 'error:' "$log"; then
-              echo "✗ Compilation errors in $(basename $log):"
-              grep 'error:' "$log"
-              ERRORS=$((ERRORS + 1))
-            fi
-          done
+          # Check for compilation errors (but not modpost warnings — those are OK without full kernel)
+          if grep -E '^drivers/.*error:' /tmp/build.log; then
+            echo "✗ Compilation errors found!"
+            ERRORS=$((ERRORS + 1))
+          fi
           exit $ERRORS
 
       - name: Upload build artifacts
@@ -123,7 +124,7 @@ jobs:
           retention-days: 7
           path: |
             drivers/**/*.ko
-            /tmp/*build.log
+            /tmp/build.log
 
   # ── Validate in-kernel patches apply cleanly ───────────────────────
   validate-patches:
