@@ -109,8 +109,14 @@ jobs:
           scripts/config --enable CONFIG_RATIONAL || true
           scripts/config --enable CONFIG_CRC32_SLICEBY8 || true
           scripts/config --disable CONFIG_STACK_VALIDATION || true
+          scripts/config --disable CONFIG_UNWINDER_ORC || true
+          scripts/config --enable CONFIG_UNWINDER_FRAME_POINTER || true
           make olddefconfig > /tmp/olddefconfig.log 2>&1 || { tail -100 /tmp/olddefconfig.log; exit 1; }
-          grep -E 'CONFIG_(USB_SERIAL|USB_NET|WWAN|MODULES|STACK_VALIDATION)[= ]' .config | head -20 || true
+          scripts/config --disable CONFIG_STACK_VALIDATION || true
+          scripts/config --disable CONFIG_UNWINDER_ORC || true
+          scripts/config --enable CONFIG_UNWINDER_FRAME_POINTER || true
+          make olddefconfig > /tmp/olddefconfig-2.log 2>&1 || { tail -100 /tmp/olddefconfig-2.log; exit 1; }
+          grep -E 'CONFIG_(USB_SERIAL|USB_NET|WWAN|MODULES|STACK_VALIDATION|UNWINDER_ORC|UNWINDER_FRAME_POINTER)[= ]' .config | head -30 || true
           make vmlinux -j$(nproc) SKIP_STACK_VALIDATION=1 HOSTCFLAGS="-Wno-error" HOSTCXXFLAGS="-Wno-error" KCFLAGS="-Wno-error" KBUILD_CFLAGS_MODULE="-Wno-error" KBUILD_USERCFLAGS="-Wno-error" > /tmp/vmlinux.log 2>&1 || { tail -200 /tmp/vmlinux.log; exit 1; }
           make modules_prepare SKIP_STACK_VALIDATION=1 HOSTCFLAGS="-Wno-error" HOSTCXXFLAGS="-Wno-error" KCFLAGS="-Wno-error" KBUILD_CFLAGS_MODULE="-Wno-error" KBUILD_USERCFLAGS="-Wno-error" > /tmp/modules_prepare.log 2>&1 || { tail -200 /tmp/modules_prepare.log; exit 1; }
           [ -f /tmp/vmlinux ] && echo '✓ vmlinux built'
