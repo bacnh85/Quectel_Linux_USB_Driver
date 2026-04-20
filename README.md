@@ -1,65 +1,45 @@
 # Quectel USB Driver Enhancements — Linux 6.12
 
-This branch contains out-of-tree build support and in-kernel patches for adding
-**comprehensive Quectel modem support** to Linux kernel **6.12**.
+Out-of-tree build support and in-kernel patches for comprehensive Quectel
+modem support on Linux kernel **6.12**.
 
 ## Supported Devices
 
-Enhanced support for 30+ Quectel modem modules including:
-- **EC Series**: EC200A, EC200S, EC200T, EC200U, EC25, EC21
-- **EG Series**: EG91, EG95, EG912Y, EG916Q
-- **EM Series**: EM05 (all variants), EM06, EM12, EM060K, EM061K
-- **RM Series**: RM500Q, RM500K, RM520N, RM500U
-- **RG Series**: RG650V
-- **BG Series**: BG95, BG96
+EC200(A/S/T/U), EC25, EC21, EG91, EG95, EG912Y, EG916Q, EM05 (all variants),
+EM06, EM12, EM060K, EM061K, RM500Q, RM500K, RM520N, RM500U, RG650V, BG95, BG96
 
 ## Quick Start
 
 ### Out-of-Tree Build (Recommended)
 
 ```bash
-# Build against running kernel headers
 make KDIR=/lib/modules/$(uname -r)/build
-
-# Or against full kernel source tree
-make KDIR=/path/to/linux-6.12
-
-# Install the modules
-sudo make install KDIR=/lib/modules/$(uname -r)/build
+sudo make install
 sudo depmod -a
 ```
 
 ### In-Kernel Patch
 
 ```bash
-# Apply patches directly to your kernel source tree
 cd /path/to/linux-6.12
-patch -p1 < /path/to/this/repo/patches/option.c.patch
-patch -p1 < /path/to/this/repo/patches/qmi_wwan.c.patch
-
-# Then build and install as usual
-make modules_install
+patch -p1 < patches/option.c.patch
+patch -p1 < patches/qmi_wwan.c.patch
 ```
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `Makefile` | Out-of-tree build system |
-| `patches/option.c.patch` | Quectel USB serial device IDs |
-| `patches/qmi_wwan.c.patch` | Quectel QMI network device IDs |
+| `Makefile` | Out-of-tree build: copies from kernel, patches, builds |
+| `patches/option.c.patch` | USB serial device IDs for Quectel modems |
+| `patches/qmi_wwan.c.patch` | QMI network device IDs for Quectel modems |
 
-## Branch Structure
+## Branches
 
-| Branch | Kernel Version |
-|--------|---------------|
-| `v5.4` | Linux 5.4 LTS |
-| `v5.15` | Linux 5.15 LTS |
-| `v6.1` | Linux 6.1 LTS |
-| `v6.6` | Linux 6.6 LTS |
-| `v6.12` | Linux 6.12 (reference) |
-
-Switch to the branch matching your kernel version:
-```bash
-git checkout v6.12
-```
+| Branch | Kernel |
+|--------|--------|
+| `v5.4` | 5.4 LTS |
+| `v5.15` | 5.15 LTS |
+| `v6.1` | 6.1 LTS |
+| `v6.6` | 6.6 LTS |
+| `v6.12` | 6.12 |
