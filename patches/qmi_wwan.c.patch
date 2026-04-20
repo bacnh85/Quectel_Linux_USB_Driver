@@ -1,6 +1,14 @@
 --- a/drivers/net/usb/qmi_wwan.c
 +++ b/drivers/net/usb/qmi_wwan.c
-@@ -1370,6 +1370,15 @@
+@@ -964,6 +964,13 @@
++#ifndef QMI_MATCH_FF_FF_FF
++#define QMI_MATCH_FF_FF_FF(vend, prod) \
++	USB_DEVICE_AND_INTERFACE_INFO(vend, prod, USB_CLASS_VENDOR_SPEC, \
++				      USB_SUBCLASS_VENDOR_SPEC, 0xff), \
++	.driver_info = (unsigned long)&qmi_wwan_info_quirk_dtr
++#endif
++
+@@ -1370,6 +1377,15 @@
  	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0121, 4)},	/* Quectel EC21 Mini PCIe */
  	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0191, 4)},	/* Quectel EG91 */
  	{QMI_FIXED_INTF(0x2c7c, 0x0296, 4)},	/* Quectel BG96 */
