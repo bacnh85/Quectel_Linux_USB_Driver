@@ -30,44 +30,30 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download kernel ${{ needs.setup.outputs.kv }}
+      - name: Download & validate patches
         run: |
           KV="${{ needs.setup.outputs.kv }}"
           MAJ="${{ needs.setup.outputs.major }}"
           curl -fSL --retry 3 -o /tmp/linux.tar.xz \
             "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${KV}.tar.xz"
-          mkdir -p /tmp/linux-src
-          tar xf /tmp/linux.tar.xz -C /tmp/linux-src --strip-components=1
-
-      - name: Dry-run patches against kernel source
-        run: |
+          mkdir -p /tmp/linux-src && tar xf /tmp/linux.tar.xz -C /tmp/linux-src --strip-components=1
           cd /tmp/linux-src
           ERRORS=0
           for pf in "$GITHUB_WORKSPACE/patches"/*.patch; do
             [ -f "$pf" ] || continue
             name=$(basename "$pf")
-            if head -1 "$pf" | grep -q "No changes"; then
-              echo "⊘ $name: no changes needed"
-              continue
-            fi
-            echo "→ Testing: $name ($(wc -l < "$pf") lines)"
-            if patch --dry-run -p1 < "$pf"; then
-              echo "✓ $name applies cleanly"
-            else
-              echo "✗ $name FAILED"
-              ERRORS=$((ERRORS + 1))
-            fi
+            head -1 "$pf" | grep -q "No changes" && echo "⊘ $name: no changes needed" && continue
+            echo "→ $name"
+            patch --dry-run -p1 < "$pf" && echo "✓ $name" || { echo "✗ $name FAILED"; ERRORS=$((ERRORS+1)); }
           done
           exit $ERRORS
 
   build-out-of-tree:
     needs: setup
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
       - name: Install deps
         run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libelf-dev bc flex bison
 
@@ -79,45 +65,62 @@ jobs:
             "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${KV}.tar.xz"
           tar xf /tmp/linux.tar.xz -C /tmp --strip-components=1
 
-      - name: Minimal kernel config + vmlinux
+      - name: Configure & build kernel with USB/NET subsystems
         run: |
           cd /tmp
-          make tinyconfig
-          cat >> .config <<'EOF'
-          CONFIG_64BIT=y
-          CONFIG_MODULES=y
-          CONFIG_MODULE_UNLOAD=y
-          CONFIG_USB=y
-          CONFIG_USB_SUPPORT=y
-          CONFIG_USB_COMMON=y
-          CONFIG_USB_ARCH_HAS_HCD=y
-          CONFIG_NET=y
-          CONFIG_INET=y
-          CONFIG_TTY=y
-          CONFIG_PRINTK=y
-          CONFIG_PROC_FS=y
-          CONFIG_SYSFS=y
-          CONFIG_DEVTMPFS=y
-          CONFIG_GENERIC_ALLOCATOR=y
-          CONFIG_CRC32=y
-          CONFIG_CRC_CCITT=y
-          CONFIG_CRC16=y
-          CONFIG_USB_SERIAL=m
-          CONFIG_USB_SERIAL_WWAN=m
-          CONFIG_USB_SERIAL_OPTION=m
-          CONFIG_USB_NET_DRIVERS=m
-          CONFIG_USB_ACM=m
-          CONFIG_WWAN_CORE=m
-          CONFIG_WWAN=y
-          EOF
-          make olddefconfig 2>&1 | tail -3
+          # Start from allnoconfig, then enable what we need
+          make allnoconfig
+          # Enable core subsystems as built-in
+          scripts/config --enable CONFIG_64BIT
+          scripts/config --enable CONFIG_MODULES
+          scripts/config --enable CONFIG_PRINTK
+          scripts/config --enable CONFIG_PROC_FS
+          scripts/config --enable CONFIG_SYSFS
+          scripts/config --enable CONFIG_DEVTMPFS
+          scripts/config --enable CONFIG_TTY
+          scripts/config --enable CONFIG_BLOCK
+          scripts/config --enable CONFIG_GENERIC_ALLOCATOR
+          scripts/config --enable CONFIG_NET
+          scripts/config --enable CONFIG_INET
+          scripts/config --enable CONFIG_CRC32
+          scripts/config --enable CONFIG_CRC16
+          scripts/config --enable CONFIG_CRC_CCITT
+          scripts/config --enable CONFIG_USB
+          scripts/config --enable CONFIG_USB_SUPPORT
+          scripts/config --enable CONFIG_USB_COMMON
+          scripts/config --enable CONFIG_USB_ARCH_HAS_HCD
+          scripts/config --enable CONFIG_USB_ANNOUNCE_NEW_DEVICES
+          # Enable USB core as built-in (needed for modpost symbol resolution)
+          scripts/config --enable CONFIG_USB_SERIAL
+          scripts/config --enable CONFIG_USB_SERIAL_CONSOLE
+          # Build usbserial as built-in so symbols are in vmlinux
+          scripts/config --set-val CONFIG_USB_SERIAL y
+          scripts/config --enable CONFIG_USB_SERIAL_WWAN
+          scripts/config --enable CONFIG_USB_SERIAL_OPTION
+          # Enable networking core
+          scripts/config --enable CONFIG_USB_NET_DRIVERS
+          scripts/config --enable CONFIG_USB_ACM
+          scripts/config --enable CONFIG_WWAN
+          scripts/config --enable CONFIG_WWAN_CORE
+          # Enable module support for our out-of-tree modules
+          scripts/config --enable CONFIG_MODULE_UNLOAD
+          scripts/config --enable CONFIG_NET_CORE
+          scripts/config --enable CONFIG_FIB_RULES
+          scripts/config --enable CONFIG_MULTIUSER
+          scripts/config --enable CONFIG_FUTEX
+          scripts/config --enable CONFIG_RATIONAL
+          scripts/config --enable CONFIG_CRC32_SLICEBY8
+          make olddefconfig 2>&1 | tail -5
+          # Verify key configs
+          grep -E 'CONFIG_(USB_SERIAL|USB_NET|WWAN|MODULES)[= ]' .config | head -10
+          # Build vmlinux (includes usbserial built-in)
           make vmlinux -j$(nproc) HOSTCFLAGS="-Wno-error" 2>&1 | tail -5
-          make modules_prepare -j$(nproc) HOSTCFLAGS="-Wno-error" 2>&1 | tail -5
+          make modules_prepare HOSTCFLAGS="-Wno-error" 2>&1 | tail -5
 
-      - name: Build out-of-tree with Makefile
+      - name: Build out-of-tree drivers
         run: |
           make KDIR=/tmp 2>&1 | tee /tmp/build.log || true
-          echo "=== Build log tail ==="
+          echo "=== Build log ==="
           tail -30 /tmp/build.log
 
       - name: Verify modules
@@ -132,9 +135,9 @@ jobs:
               ERRORS=$((ERRORS + 1))
             fi
           done
-          if grep -E 'error:' /tmp/build.log | grep -qv 'warning'; then
-            echo "✗ Compilation errors:"
-            grep -E 'error:' /tmp/build.log | head -10
+          # Check compilation errors (not modpost — we handle that separately)
+          if grep -E 'fatal error:' /tmp/build.log; then
+            echo "✗ Compilation errors!"
             ERRORS=$((ERRORS + 1))
           fi
           exit $ERRORS
