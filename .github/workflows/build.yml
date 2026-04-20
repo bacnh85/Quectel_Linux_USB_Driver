@@ -31,12 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download & validate patches
+        shell: bash
         run: |
+          set -euo pipefail
           KV="${{ needs.setup.outputs.kv }}"
           MAJ="${{ needs.setup.outputs.major }}"
-          curl -fSL --retry 3 -o /tmp/linux.tar.xz \
-            "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${KV}.tar.xz"
-          mkdir -p /tmp/linux-src && tar xf /tmp/linux.tar.xz -C /tmp/linux-src --strip-components=1
+          curl -fSL --retry 3 -o /tmp/linux.tar.xz             "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${KV}.tar.xz"
+          mkdir -p /tmp/linux-src
+          tar xf /tmp/linux.tar.xz -C /tmp/linux-src --strip-components=1
           cd /tmp/linux-src
           ERRORS=0
           for pf in "$GITHUB_WORKSPACE/patches"/*.patch; do
@@ -58,20 +60,21 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libelf-dev bc flex bison
 
       - name: Download kernel ${{ needs.setup.outputs.kv }}
+        shell: bash
         run: |
+          set -euo pipefail
           KV="${{ needs.setup.outputs.kv }}"
           MAJ="${{ needs.setup.outputs.major }}"
-          curl -fSL --retry 3 -o /tmp/linux.tar.xz \
-            "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${KV}.tar.xz"
+          curl -fSL --retry 3 -o /tmp/linux.tar.xz             "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${KV}.tar.xz"
           tar xf /tmp/linux.tar.xz -C /tmp --strip-components=1
 
       - name: Configure & build kernel with USB/NET subsystems
+        shell: bash
         run: |
+          set -euo pipefail
           cd /tmp
-          # Start from allnoconfig, then enable what we need
-          make allnoconfig
-          # Enable core subsystems as built-in
-          scripts/config --enable CONFIG_64BIT
+          make allnoconfig > /tmp/allnoconfig.log 2>&1
+          scripts/config --enable CONFIG_64BIT || true
           scripts/config --enable CONFIG_MODULES
           scripts/config --enable CONFIG_PRINTK
           scripts/config --enable CONFIG_PROC_FS
@@ -86,48 +89,48 @@ jobs:
           scripts/config --enable CONFIG_CRC16
           scripts/config --enable CONFIG_CRC_CCITT
           scripts/config --enable CONFIG_USB
-          scripts/config --enable CONFIG_USB_SUPPORT
-          scripts/config --enable CONFIG_USB_COMMON
-          scripts/config --enable CONFIG_USB_ARCH_HAS_HCD
-          scripts/config --enable CONFIG_USB_ANNOUNCE_NEW_DEVICES
-          # Enable USB core as built-in (needed for modpost symbol resolution)
-          scripts/config --enable CONFIG_USB_SERIAL
-          scripts/config --enable CONFIG_USB_SERIAL_CONSOLE
-          # Build usbserial as built-in so symbols are in vmlinux
+          scripts/config --enable CONFIG_USB_SUPPORT || true
+          scripts/config --enable CONFIG_USB_COMMON || true
+          scripts/config --enable CONFIG_USB_ARCH_HAS_HCD || true
+          scripts/config --enable CONFIG_USB_ANNOUNCE_NEW_DEVICES || true
           scripts/config --set-val CONFIG_USB_SERIAL y
-          scripts/config --enable CONFIG_USB_SERIAL_WWAN
-          scripts/config --enable CONFIG_USB_SERIAL_OPTION
-          # Enable networking core
-          scripts/config --enable CONFIG_USB_NET_DRIVERS
-          scripts/config --enable CONFIG_USB_ACM
-          scripts/config --enable CONFIG_WWAN
-          scripts/config --enable CONFIG_WWAN_CORE
-          # Enable module support for our out-of-tree modules
-          scripts/config --enable CONFIG_MODULE_UNLOAD
-          scripts/config --enable CONFIG_NET_CORE
-          scripts/config --enable CONFIG_FIB_RULES
-          scripts/config --enable CONFIG_MULTIUSER
-          scripts/config --enable CONFIG_FUTEX
-          scripts/config --enable CONFIG_RATIONAL
-          scripts/config --enable CONFIG_CRC32_SLICEBY8
-          make olddefconfig 2>&1 | tail -5
-          # Verify key configs
-          grep -E 'CONFIG_(USB_SERIAL|USB_NET|WWAN|MODULES)[= ]' .config | head -10
-          # Build vmlinux (includes usbserial built-in)
-          make vmlinux -j$(nproc) HOSTCFLAGS="-Wno-error" 2>&1 | tail -5
-          make modules_prepare HOSTCFLAGS="-Wno-error" 2>&1 | tail -5
+          scripts/config --enable CONFIG_USB_SERIAL_CONSOLE || true
+          scripts/config --enable CONFIG_USB_SERIAL_WWAN || true
+          scripts/config --enable CONFIG_USB_SERIAL_OPTION || true
+          scripts/config --enable CONFIG_USB_NET_DRIVERS || true
+          scripts/config --enable CONFIG_USB_ACM || true
+          scripts/config --enable CONFIG_WWAN || true
+          scripts/config --enable CONFIG_WWAN_CORE || true
+          scripts/config --enable CONFIG_MODULE_UNLOAD || true
+          scripts/config --enable CONFIG_NET_CORE || true
+          scripts/config --enable CONFIG_FIB_RULES || true
+          scripts/config --enable CONFIG_MULTIUSER || true
+          scripts/config --enable CONFIG_FUTEX || true
+          scripts/config --enable CONFIG_RATIONAL || true
+          scripts/config --enable CONFIG_CRC32_SLICEBY8 || true
+          scripts/config --disable CONFIG_STACK_VALIDATION || true
+          make olddefconfig > /tmp/olddefconfig.log 2>&1 || { tail -100 /tmp/olddefconfig.log; exit 1; }
+          grep -E 'CONFIG_(USB_SERIAL|USB_NET|WWAN|MODULES|STACK_VALIDATION)[= ]' .config | head -20 || true
+          make vmlinux -j$(nproc) SKIP_STACK_VALIDATION=1 HOSTCFLAGS="-Wno-error" > /tmp/vmlinux.log 2>&1 || { tail -200 /tmp/vmlinux.log; exit 1; }
+          make modules_prepare SKIP_STACK_VALIDATION=1 HOSTCFLAGS="-Wno-error" > /tmp/modules_prepare.log 2>&1 || { tail -200 /tmp/modules_prepare.log; exit 1; }
+          [ -f /tmp/vmlinux ] && echo '✓ vmlinux built'
+          [ -f /tmp/Module.symvers ] && echo '✓ Module.symvers present' || echo '! Module.symvers still missing; modpost warnings will be tolerated'
 
       - name: Build out-of-tree drivers
+        shell: bash
         run: |
-          make KDIR=/tmp 2>&1 | tee /tmp/build.log || true
+          set -euo pipefail
+          make KDIR=/tmp KBUILD_MODPOST_WARN=1 2>&1 | tee /tmp/build.log
           echo "=== Build log ==="
-          tail -30 /tmp/build.log
+          tail -40 /tmp/build.log
 
       - name: Verify modules
+        shell: bash
         run: |
+          set -euo pipefail
           ERRORS=0
           for mod in option.ko usb_wwan.ko qmi_wwan.ko; do
-            found=$(find build/ -name "$mod" -print -quit 2>/dev/null)
+            found=$(find build/ -name "$mod" -print -quit 2>/dev/null || true)
             if [ -n "$found" ]; then
               echo "✓ $mod"
             else
@@ -135,7 +138,6 @@ jobs:
               ERRORS=$((ERRORS + 1))
             fi
           done
-          # Check compilation errors (not modpost — we handle that separately)
           if grep -E 'fatal error:' /tmp/build.log; then
             echo "✗ Compilation errors!"
             ERRORS=$((ERRORS + 1))
@@ -151,5 +153,4 @@ jobs:
           echo "## kernel ${{ needs.setup.outputs.kv }}"
           echo "patches: ${{ needs.validate-patches.result }}"
           echo "build:   ${{ needs.build-out-of-tree.result }}"
-          [ "${{ needs.validate-patches.result }}" = "success" ] && \
-          [ "${{ needs.build-out-of-tree.result }}" = "success" ] || exit 1
+          [ "${{ needs.validate-patches.result }}" = "success" ] &&           [ "${{ needs.build-out-of-tree.result }}" = "success" ] || exit 1
