@@ -1,8 +1,8 @@
---- a/qmi_wwan.c
+--- a/drivers/net/usb/qmi_wwan.c
 
-+++ b/qmi_wwan.c
++++ b/drivers/net/usb/qmi_wwan.c
 
-@@ -1403,6 +1403,11 @@
+@@ -1403,6 +1403,9 @@
 
  	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0191, 4)},	/* Quectel EG91 */
 
@@ -12,11 +12,7 @@
 
 +	{QMI_MATCH_FF_FF_FF(0x2c7c, 0x0122)},	/* Quectel RG650V */
 
-+	{QMI_MATCH_FF_FF_FF(0x2c7c, 0x0800)},	/* Quectel RM500Q-GL */
-
 +	{QMI_MATCH_FF_FF_FF(0x2c7c, 0x0801)},	/* Quectel RM520N */
-
-+	{QMI_FIXED_INTF(0x2c7c, 0x0296, 4)},	/* Quectel BG96 */
 
 +	{QMI_QUIRK_SET_DTR(0x2c7c, 0x030e, 4)},	/* Quectel EM05GV2 */
 

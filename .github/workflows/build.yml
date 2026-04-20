@@ -10,26 +10,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Resolve kernel version from branch name ────────────────────────
   setup:
     runs-on: ubuntu-latest
     outputs:
-      kernel_version: ${{ steps.meta.outputs.kv }}
-      kernel_major: ${{ steps.meta.outputs.major }}
+      kv: ${{ steps.m.outputs.kv }}
+      major: ${{ steps.m.outputs.major }}
     steps:
-      - id: meta
+      - id: m
         run: |
           REF="${GITHUB_REF_NAME}"
-          if [[ "$REF" == */merge ]]; then
-            REF="${{ github.head_ref }}"
-          fi
+          [[ "$REF" == */merge ]] && REF="${{ github.head_ref }}"
           KV="${REF#v}"
-          MAJOR="${KV%%.*}"
-          echo "kv=${KV}"      >> "$GITHUB_OUTPUT"
-          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
-          echo "Branch: ${REF} → Kernel: ${KV} (major: ${MAJOR})"
+          echo "kv=${KV}" >> "$GITHUB_OUTPUT"
+          echo "major=${KV%%.*}" >> "$GITHUB_OUTPUT"
 
-  # ── Validate in-kernel patches apply cleanly ───────────────────────
   validate-patches:
     needs: setup
     runs-on: ubuntu-latest
@@ -37,38 +31,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download kernel ${{ needs.setup.outputs.kernel_version }}
+      - name: Download kernel ${{ needs.setup.outputs.kv }}
         run: |
-          KV="${{ needs.setup.outputs.kernel_version }}"
-          MAJOR="${{ needs.setup.outputs.kernel_major }}"
-          URL="https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KV}.tar.xz"
-          curl -fSL --retry 3 -o /tmp/linux.tar.xz "${URL}"
+          KV="${{ needs.setup.outputs.kv }}"
+          MAJ="${{ needs.setup.outputs.major }}"
+          curl -fSL --retry 3 -o /tmp/linux.tar.xz \
+            "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${KV}.tar.xz"
           mkdir -p /tmp/linux-src
           tar xf /tmp/linux.tar.xz -C /tmp/linux-src --strip-components=1
 
-      - name: Test patches apply cleanly
+      - name: Dry-run patches against kernel source
         run: |
           cd /tmp/linux-src
-          PATCHDIR="$GITHUB_WORKSPACE/patches"
           ERRORS=0
-          for patchfile in "$PATCHDIR"/*.patch; do
-            [ -f "$patchfile" ] || continue
-            pname=$(basename "$patchfile")
-            if head -1 "$patchfile" | grep -q "no changes needed"; then
-              echo "⊘ $pname: no changes needed for this kernel version"
+          for pf in "$GITHUB_WORKSPACE/patches"/*.patch; do
+            [ -f "$pf" ] || continue
+            name=$(basename "$pf")
+            if head -1 "$pf" | grep -q "No changes"; then
+              echo "⊘ $name: no changes needed"
               continue
             fi
-            echo "→ Testing: $pname ($(wc -l < "$patchfile") lines)"
-            if patch --dry-run -p1 < "$patchfile" 2>&1; then
-              echo "✓ $pname applies cleanly"
+            echo "→ Testing: $name ($(wc -l < "$pf") lines)"
+            if patch --dry-run -p1 < "$pf"; then
+              echo "✓ $name applies cleanly"
             else
-              echo "✗ $pname FAILED to apply!"
+              echo "✗ $name FAILED"
               ERRORS=$((ERRORS + 1))
             fi
           done
           exit $ERRORS
 
-  # ── Build out-of-tree modules using the Makefile ───────────────────
   build-out-of-tree:
     needs: setup
     runs-on: ubuntu-latest
@@ -76,24 +68,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq build-essential libelf-dev bc flex bison
+      - name: Install deps
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libelf-dev bc flex bison
 
-      - name: Download kernel ${{ needs.setup.outputs.kernel_version }}
+      - name: Download kernel ${{ needs.setup.outputs.kv }}
         run: |
-          KV="${{ needs.setup.outputs.kernel_version }}"
-          MAJOR="${{ needs.setup.outputs.kernel_major }}"
-          URL="https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KV}.tar.xz"
-          curl -fSL --retry 3 -o /tmp/linux.tar.xz "${URL}"
+          KV="${{ needs.setup.outputs.kv }}"
+          MAJ="${{ needs.setup.outputs.major }}"
+          curl -fSL --retry 3 -o /tmp/linux.tar.xz \
+            "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${KV}.tar.xz"
           tar xf /tmp/linux.tar.xz -C /tmp --strip-components=1
 
-      - name: Prepare minimal kernel config
+      - name: Minimal kernel config + vmlinux
         run: |
           cd /tmp
           make tinyconfig
-          # Enable subsystems needed for USB serial and net drivers
           cat >> .config <<'EOF'
           CONFIG_64BIT=y
           CONFIG_MODULES=y
@@ -105,7 +94,6 @@ jobs:
           CONFIG_NET=y
           CONFIG_INET=y
           CONFIG_TTY=y
-          CONFIG_BLOCK=y
           CONFIG_PRINTK=y
           CONFIG_PROC_FS=y
           CONFIG_SYSFS=y
@@ -118,72 +106,47 @@ jobs:
           CONFIG_USB_SERIAL_WWAN=m
           CONFIG_USB_SERIAL_OPTION=m
           CONFIG_USB_NET_DRIVERS=m
-          CONFIG_USB_NET_CDCETHER=m
           CONFIG_USB_ACM=m
-          CONFIG_NET_CORE=y
           CONFIG_WWAN_CORE=m
           CONFIG_WWAN=y
           EOF
           make olddefconfig 2>&1 | tail -3
-
-      - name: Build vmlinux + modules_prepare
-        run: |
-          cd /tmp
           make vmlinux -j$(nproc) HOSTCFLAGS="-Wno-error" 2>&1 | tail -5
           make modules_prepare -j$(nproc) HOSTCFLAGS="-Wno-error" 2>&1 | tail -5
 
-      - name: Build out-of-tree drivers
+      - name: Build out-of-tree with Makefile
         run: |
-          # Use our Makefile: copies kernel sources, patches, builds
           make KDIR=/tmp 2>&1 | tee /tmp/build.log || true
           echo "=== Build log tail ==="
-          tail -20 /tmp/build.log
+          tail -30 /tmp/build.log
 
-      - name: Verify modules built
+      - name: Verify modules
         run: |
           ERRORS=0
           for mod in option.ko usb_wwan.ko qmi_wwan.ko; do
             found=$(find build/ -name "$mod" -print -quit 2>/dev/null)
             if [ -n "$found" ]; then
-              echo "✓ $mod built successfully ($found)"
+              echo "✓ $mod"
             else
-              echo "✗ $mod NOT found!"
+              echo "✗ $mod NOT found"
               ERRORS=$((ERRORS + 1))
             fi
           done
-          # Check for real compilation errors
-          if grep -E 'error:' /tmp/build.log | grep -qv 'error:.*warning'; then
-            echo "✗ Compilation errors detected!"
+          if grep -E 'error:' /tmp/build.log | grep -qv 'warning'; then
+            echo "✗ Compilation errors:"
             grep -E 'error:' /tmp/build.log | head -10
             ERRORS=$((ERRORS + 1))
           fi
           exit $ERRORS
 
-      - name: Upload build artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: out-of-tree-${{ needs.setup.outputs.kernel_version }}
-          retention-days: 7
-          path: |
-            build/**/*.ko
-            /tmp/build.log
-
-  # ── Summary ────────────────────────────────────────────────────────
   summary:
     needs: [setup, validate-patches, build-out-of-tree]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Build status
-        run: |
-          echo "## Build Summary — kernel ${{ needs.setup.outputs.kernel_version }}"
-          echo "Out-of-tree build:  ${{ needs.build-out-of-tree.result }}"
-          echo "In-kernel patches:  ${{ needs.validate-patches.result }}"
-          if [ "${{ needs.build-out-of-tree.result }}" = "success" ] && \
-             [ "${{ needs.validate-patches.result }}" = "success" ]; then
-            echo "✅ All checks passed"
-          else
-            echo "❌ Some checks failed"
-            exit 1
-          fi
+      - run: |
+          echo "## kernel ${{ needs.setup.outputs.kv }}"
+          echo "patches: ${{ needs.validate-patches.result }}"
+          echo "build:   ${{ needs.build-out-of-tree.result }}"
+          [ "${{ needs.validate-patches.result }}" = "success" ] && \
+          [ "${{ needs.build-out-of-tree.result }}" = "success" ] || exit 1
