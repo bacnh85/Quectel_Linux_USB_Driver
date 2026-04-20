@@ -1,0 +1,189 @@
+name: Build & Validate Drivers
+
+on:
+  push:
+    branches: ['v5.4', 'v5.15', 'v6.1', 'v6.6', 'v6.12']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  # ── Resolve kernel version from branch name ────────────────────────
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      kernel_version: ${{ steps.meta.outputs.kv }}
+      kernel_major: ${{ steps.meta.outputs.major }}
+    steps:
+      - id: meta
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+          KV="${BRANCH#v}"
+          MAJOR="${KV%%.*}"
+          echo "kv=${KV}"   >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
+          echo "Building for kernel ${KV} (branch ${BRANCH})"
+
+  # ── Build out-of-tree modules against kernel source ────────────────
+  build-out-of-tree:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential libelf-dev bc flex bison cpio
+
+      - name: Download kernel ${{ needs.setup.outputs.kernel_version }}
+        run: |
+          KV="${{ needs.setup.outputs.kernel_version }}"
+          MAJOR="${{ needs.setup.outputs.kernel_major }}"
+          URL="https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KV}.tar.xz"
+          echo "Downloading: ${URL}"
+          curl -fSL --retry 3 --retry-delay 5 -o /tmp/linux.tar.xz "${URL}"
+          tar xf /tmp/linux.tar.xz -C /tmp --strip-components=1
+          echo "Kernel source: $(ls /tmp/Makefile)"
+
+      - name: Build minimal kernel (vmlinux + modules_prepare)
+        run: |
+          cd /tmp
+          # Use tinyconfig as base — minimal, fast to build
+          make tinyconfig
+          # Enable subsystems our drivers depend on
+          scripts/config --enable CONFIG_USB
+          scripts/config --enable CONFIG_USB_SUPPORT
+          scripts/config --enable CONFIG_MODULES
+          scripts/config --enable CONFIG_MODULE_UNLOAD
+          scripts/config --enable CONFIG_NET
+          scripts/config --enable CONFIG_INET
+          scripts/config --enable CONFIG_TTY
+          scripts/config --enable CONFIG_BLOCK
+          scripts/config --enable CONFIG_64BIT
+          # USB serial subsystem
+          scripts/config --module CONFIG_USB_SERIAL
+          scripts/config --module CONFIG_USB_SERIAL_WWAN
+          scripts/config --module CONFIG_USB_SERIAL_OPTION
+          # USB net subsystem
+          scripts/config --module CONFIG_USB_NET_DRIVERS
+          scripts/config --module CONFIG_USB_NET_CDCETHER
+          scripts/config --module CONFIG_USB_ACM
+          # Needed dependencies
+          scripts/config --enable CONFIG_GENERIC_ALLOCATOR
+          scripts/config --enable CONFIG_CRC32
+          scripts/config --enable CONFIG_CRC_CCITT
+          scripts/config --enable CONFIG_PRINTK
+          scripts/config --enable CONFIG_PROC_FS
+          scripts/config --enable CONFIG_SYSFS
+          scripts/config --enable CONFIG_DEVTMPFS
+          scripts/config --enable CONFIG_CRC16
+          make olddefconfig
+          # Build vmlinux first (needed for modpost symbol resolution)
+          make vmlinux -j$(nproc)
+          # Then prepare module build infrastructure
+          make modules_prepare -j$(nproc)
+
+      - name: Build out-of-tree modules
+        run: |
+          echo "=== Building serial drivers ==="
+          $(MAKE) -C /tmp M=$(PWD)/drivers/usb/serial modules 2>&1 | tee /tmp/serial-build.log
+          echo "=== Building net drivers ==="
+          $(MAKE) -C /tmp M=$(PWD)/drivers/net/usb modules 2>&1 | tee /tmp/net-build.log
+
+      - name: Verify built modules
+        run: |
+          ERRORS=0
+          for mod in option.ko usb_wwan.ko qmi_wwan.ko; do
+            if find drivers/ -name "$mod" -print -quit | grep -q .; then
+              echo "✓ $mod built successfully"
+            else
+              echo "✗ $mod NOT found!"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          # Check for compilation errors
+          for log in /tmp/serial-build.log /tmp/net-build.log; do
+            if grep -q 'error:' "$log"; then
+              echo "✗ Compilation errors in $(basename $log):"
+              grep 'error:' "$log"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          exit $ERRORS
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out-of-tree-${{ needs.setup.outputs.kernel_version }}
+          retention-days: 7
+          path: |
+            drivers/**/*.ko
+            /tmp/*build.log
+
+  # ── Validate in-kernel patches apply cleanly ───────────────────────
+  validate-patches:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq curl
+
+      - name: Download kernel ${{ needs.setup.outputs.kernel_version }}
+        run: |
+          KV="${{ needs.setup.outputs.kernel_version }}"
+          MAJOR="${{ needs.setup.outputs.kernel_major }}"
+          URL="https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KV}.tar.xz"
+          curl -fSL --retry 3 -o /tmp/linux.tar.xz "${URL}"
+          mkdir -p /tmp/linux-src
+          tar xf /tmp/linux.tar.xz -C /tmp/linux-src --strip-components=1
+
+      - name: Dry-run patches
+        run: |
+          cd /tmp/linux-src
+          PATCHDIR="$GITHUB_WORKSPACE/patches"
+          ERRORS=0
+          for patchfile in "$PATCHDIR"/*.patch; do
+            [ -f "$patchfile" ] || continue
+            pname=$(basename "$patchfile")
+            # Skip placeholder patches
+            if head -1 "$patchfile" | grep -q "no changes needed"; then
+              echo "⊘ $pname: no changes needed"
+              continue
+            fi
+            echo "→ Testing: $pname ($(wc -l < "$patchfile") lines)"
+            if patch --dry-run -p1 < "$patchfile" 2>&1; then
+              echo "✓ $pname applies cleanly"
+            else
+              echo "✗ $pname FAILED to apply!"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          exit $ERRORS
+
+  # ── Summary ────────────────────────────────────────────────────────
+  summary:
+    needs: [setup, build-out-of-tree, validate-patches]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build status
+        run: |
+          echo "## Build Summary — kernel ${{ needs.setup.outputs.kernel_version }}"
+          echo ""
+          echo "Out-of-tree build:  ${{ needs.build-out-of-tree.result }}"
+          echo "In-kernel patches:  ${{ needs.validate-patches.result }}"
+          if [ "${{ needs.build-out-of-tree.result }}" = "success" ] && \
+             [ "${{ needs.validate-patches.result }}" = "success" ]; then
+            echo "✅ All checks passed"
+          else
+            echo "❌ Some checks failed"
+            exit 1
+          fi
