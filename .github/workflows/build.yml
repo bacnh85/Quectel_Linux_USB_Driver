@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install deps
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libelf-dev bc flex bison
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libelf-dev bc flex bison gcc-11 g++-11
 
       - name: Download kernel ${{ needs.setup.outputs.kv }}
         shell: bash
@@ -117,8 +117,12 @@ jobs:
           scripts/config --enable CONFIG_UNWINDER_FRAME_POINTER || true
           make olddefconfig > /tmp/olddefconfig-2.log 2>&1 || { tail -100 /tmp/olddefconfig-2.log; exit 1; }
           grep -E 'CONFIG_(USB_SERIAL|USB_NET|WWAN|MODULES|STACK_VALIDATION|UNWINDER_ORC|UNWINDER_FRAME_POINTER)[= ]' .config | head -30 || true
-          make vmlinux -j$(nproc) SKIP_STACK_VALIDATION=1 HOSTCFLAGS="-Wno-error" HOSTCXXFLAGS="-Wno-error" KCFLAGS="-Wno-error" KBUILD_CFLAGS_MODULE="-Wno-error" KBUILD_USERCFLAGS="-Wno-error" > /tmp/vmlinux.log 2>&1 || { tail -200 /tmp/vmlinux.log; exit 1; }
-          make modules_prepare SKIP_STACK_VALIDATION=1 HOSTCFLAGS="-Wno-error" HOSTCXXFLAGS="-Wno-error" KCFLAGS="-Wno-error" KBUILD_CFLAGS_MODULE="-Wno-error" KBUILD_USERCFLAGS="-Wno-error" > /tmp/modules_prepare.log 2>&1 || { tail -200 /tmp/modules_prepare.log; exit 1; }
+          export CC=gcc-11
+          export HOSTCC=gcc-11
+          export CXX=g++-11
+          export HOSTCXX=g++-11
+          make vmlinux -j$(nproc) CC=gcc-11 HOSTCC=gcc-11 HOSTCXX=g++-11 SKIP_STACK_VALIDATION=1 HOSTCFLAGS="-Wno-error" HOSTCXXFLAGS="-Wno-error" KCFLAGS="-Wno-error" KBUILD_CFLAGS_MODULE="-Wno-error" KBUILD_USERCFLAGS="-Wno-error" > /tmp/vmlinux.log 2>&1 || { tail -200 /tmp/vmlinux.log; exit 1; }
+          make modules_prepare CC=gcc-11 HOSTCC=gcc-11 HOSTCXX=g++-11 SKIP_STACK_VALIDATION=1 HOSTCFLAGS="-Wno-error" HOSTCXXFLAGS="-Wno-error" KCFLAGS="-Wno-error" KBUILD_CFLAGS_MODULE="-Wno-error" KBUILD_USERCFLAGS="-Wno-error" > /tmp/modules_prepare.log 2>&1 || { tail -200 /tmp/modules_prepare.log; exit 1; }
           [ -f /tmp/vmlinux ] && echo '✓ vmlinux built'
           [ -f /tmp/Module.symvers ] && echo '✓ Module.symvers present' || echo '! Module.symvers still missing; modpost warnings will be tolerated'
 
@@ -126,7 +130,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          make KDIR=/tmp KBUILD_MODPOST_WARN=1 2>&1 | tee /tmp/build.log
+          make KDIR=/tmp CC=gcc-11 HOSTCC=gcc-11 HOSTCXX=g++-11 KBUILD_MODPOST_WARN=1 2>&1 | tee /tmp/build.log
           echo "=== Build log ==="
           tail -40 /tmp/build.log
 
