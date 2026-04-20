@@ -1,0 +1,2 @@
+obj-m += option.o
+obj-m += usb_wwan.o
